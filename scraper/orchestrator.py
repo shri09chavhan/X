@@ -138,8 +138,21 @@ class ScraperOrchestrator:
             # Measure scroll dispatch and lazy-load wait time
             wait_start = time.perf_counter()
             scroll_count += 1
-            self.page.mouse.wheel(0, random.randint(700, 1100))
-            time.sleep(random.uniform(1.2, 2.0))
+            current_article_count = len(articles)
+
+            # Native CloakBrowser big scroll (3-4 viewports down, genuine OS input event)
+            self.page.mouse.wheel(0, random.randint(2500, 3800))
+
+            # Dynamic Smart Wait: resolves immediately the millisecond new posts mount in DOM
+            try:
+                self.page.wait_for_function(
+                    f"() => document.querySelectorAll('{self.selectors['post_container']}').length > {current_article_count}",
+                    timeout=2500,
+                )
+            except Exception:
+                # Fallback if network is delayed or end of feed is reached
+                pass
+
             scroll_waiting_time += time.perf_counter() - wait_start
 
         total_time = time.perf_counter() - start_time
