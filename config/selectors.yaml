@@ -1,0 +1,15 @@
+# X (Twitter) Scraper Selectors
+selectors:
+  search_input_label: '[data-testid="SearchBox_Search_Input_label"]'
+  search_input: '[data-testid="SearchBox_Search_Input_label"] input, input[data-testid="SearchBox_Search_Input"]'
+  post_container: 'article[data-testid="tweet"]'
+  post_text: '[data-testid="tweetText"]'
+  user_name: '[data-testid="User-Name"]'
+  reply: '[data-testid="reply"]'
+  repost: '[data-testid="retweet"]'
+  like: '[data-testid="like"]'
+  unlike: '[data-testid="unlike"]'
+  text_transition: '[data-testid="app-text-transition-container"]'
+  analytics: 'a[href*="/analytics"]'
+  view_aria: '[aria-label*="view" i]'
+  latest_tab_query: 'a[role="tab"][href*="f=live"], a[role="tab"]:has-text("Latest")'
