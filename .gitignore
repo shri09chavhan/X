@@ -1,0 +1,23 @@
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environment variables & secrets
+.env
+.env.local
+
+# Browser data & automation logs
+*.log
+screenshots/
+downloads/
+user_data/
+
+# Session & Credentials
+session.json
+scraped_tweets.json
