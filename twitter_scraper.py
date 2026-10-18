@@ -67,9 +67,10 @@ def launch_authenticated_browser(headless: bool = False):
     context = cloakbrowser.launch_context(
         headless=headless,
         storage_state=str(SESSION_FILE),
-        viewport={"width": 1280, "height": 900},
+        viewport=None,
         humanize=True,
         args=[
+            "--start-maximized",
             "--disable-blink-features=AutomationControlled",
         ],
     )
