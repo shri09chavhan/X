@@ -21,3 +21,4 @@ user_data/
 # Session & Credentials
 session.json
 scraped_tweets.json
+output/
