@@ -52,11 +52,25 @@ class GraphQLExtractor:
             return
 
         try:
+            if response.status == 429:
+                logger.warning("🚨 X Rate Limit Exceeded (HTTP 429) on SearchTimeline! Cooling down...")
+                return
+            elif response.status >= 400:
+                logger.warning(f"⚠️ SearchTimeline returned HTTP {response.status}")
+                return
+
             content_type = response.headers.get("content-type", "")
             if "application/json" not in content_type:
                 return
 
             payload = response.json()
+            if "errors" in payload:
+                error_msgs = [e.get("message", "") for e in payload.get("errors", [])]
+                logger.warning(f"⚠️ SearchTimeline GraphQL error: {error_msgs}")
+                if any("rate limit" in str(e).lower() or e.get("code") == 88 for e in payload.get("errors", [])):
+                    logger.warning("🚨 X API Rate Limit Code 88 detected.")
+                return
+
             extracted_batch = self._extract_posts_from_timeline_payload(payload)
 
             new_count = 0

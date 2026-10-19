@@ -7,6 +7,7 @@ resource monitoring, and a state-of-the-art Rich UI.
 import argparse
 import json
 import logging
+import time
 from pathlib import Path
 from typing import List
 
@@ -257,21 +258,32 @@ def main():
     summary_records = []
 
     try:
-        for query in queries:
+        for i, query in enumerate(queries):
+            if i > 0:
+                logger.info("Applying inter-query cooldown (3.0s) to prevent API throttling...")
+                time.sleep(3.0)
+
             logger.info(f">>> Processing: [bold blue]{query}[/bold blue] (limit={args.limit}, max_scrolls={args.max_scrolls})")
 
-            posts = orchestrator.scrape(
-                query=query,
-                limit=args.limit,
-                max_scrolls=args.max_scrolls,
-                max_empty_scrolls=args.max_empty_scrolls,
-                select_latest=(args.tab == "latest"),
-            )
+            try:
+                posts = orchestrator.scrape(
+                    query=query,
+                    limit=args.limit,
+                    max_scrolls=args.max_scrolls,
+                    max_empty_scrolls=args.max_empty_scrolls,
+                    select_latest=(args.tab == "latest"),
+                )
+            except Exception as err:
+                if "Target page, context or browser has been closed" in str(err) or "TargetClosedError" in type(err).__name__:
+                    logger.warning("Browser window was closed. Terminating collection gracefully.")
+                    break
+                logger.error(f"Error during scrape of '{query}': {err}")
+                posts = []
 
             bm = orchestrator.last_benchmark
 
             # Print dedicated benchmark card immediately
-            if bm:
+            if bm and posts:
                 print_benchmark_card(bm)
                 save_benchmark_to_disk(bm)
                 # Benchmark comparison

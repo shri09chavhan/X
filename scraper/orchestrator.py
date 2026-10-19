@@ -50,19 +50,54 @@ class ScraperOrchestrator:
         self.browser.close()
 
     def _open_search_results(self, query: str, select_latest: bool = True) -> bool:
-        """Navigates to search page and waits for initial container readiness."""
+        """Navigates to search page and waits for initial container readiness with retry recovery."""
         logger.info(f"Navigating to X search for: {query}")
         url = f"https://x.com/search?q={quote(query)}"
         if select_latest:
             url += "&f=live"
 
-        self.page.goto(url, wait_until="domcontentloaded")
         try:
-            self.page.wait_for_selector(self.selectors["post_container"], timeout=15000)
-            return True
+            self.page.goto(url, wait_until="domcontentloaded")
         except Exception as e:
-            logger.warning(f"Timeout waiting for results: {e}")
+            logger.error(f"Navigation to {url} failed: {e}")
             return False
+
+        # Wait up to 20s, actively checking for intercepted posts, DOM articles, or Retry prompts
+        deadline = time.perf_counter() + 20.0
+        retry_clicked = False
+
+        while time.perf_counter() < deadline:
+            # 1. Success condition A: GraphQL interceptor already captured initial posts
+            if self.network_extractor._captured_posts:
+                return True
+
+            # 2. Success condition B: DOM article container is present
+            try:
+                if self.page.query_selector(self.selectors["post_container"]):
+                    return True
+            except Exception:
+                pass
+
+            # 3. Recovery condition: X displayed a transient error boundary with a "Retry" button
+            try:
+                retry_btn = self.page.query_selector('button:has-text("Retry"), [role="button"]:has-text("Retry")')
+                if retry_btn and retry_btn.is_visible() and not retry_clicked:
+                    logger.warning("Detected X 'Retry' prompt. Clicking Retry button to recover...")
+                    retry_btn.click()
+                    retry_clicked = True
+                    time.sleep(2.0)
+                    continue
+            except Exception:
+                pass
+
+            time.sleep(0.4)
+
+        # Final check if posts arrived
+        if self.network_extractor._captured_posts:
+            return True
+
+        logger.warning(f"Timeout waiting for search results on '{query}' (20s exceeded).")
+        return False
 
     def scrape(
         self,
@@ -78,6 +113,9 @@ class ScraperOrchestrator:
         """
         if not self.page:
             raise RuntimeError("Browser not started. Call .start() first.")
+
+        # Clear benchmark to avoid reporting stale metrics if navigation fails
+        self.last_benchmark = {}
 
         start_time = time.perf_counter()
         initial_resources = get_process_metrics()
