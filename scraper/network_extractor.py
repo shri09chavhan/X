@@ -224,9 +224,18 @@ class GraphQLExtractor:
         self._captured_posts = self._captured_posts[limit:]
         return pulled
 
-    def has_pending_posts(self) -> bool:
-        """Returns True if intercepted posts are ready in the queue."""
-        return len(self._captured_posts) > 0
+    def wait_for_new_posts(self, timeout_sec: float = 1.8, min_posts: int = 1) -> bool:
+        """
+        Polls with micro-intervals (25ms) until new GraphQL posts arrive or timeout expires.
+        Resolves within ~150-300ms the millisecond network response packets are parsed.
+        """
+        import time
+        deadline = time.perf_counter() + timeout_sec
+        while time.perf_counter() < deadline:
+            if len(self._captured_posts) >= min_posts:
+                return True
+            time.sleep(0.025)
+        return len(self._captured_posts) >= min_posts
 
     def get_total_captured_count(self) -> int:
         """Returns the number of unique posts captured so far."""

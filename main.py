@@ -52,7 +52,8 @@ def print_benchmark_card(bm: dict):
     total_t = max(tb["total_duration_sec"], 0.001)
 
     nav_pct = (tb["navigation_network_sec"] / total_t) * 100
-    ext_pct = (tb["dom_extraction_sec"] / total_t) * 100
+    json_proc = tb.get("json_processing_sec", tb.get("dom_extraction_sec", 0.0))
+    proc_pct = (json_proc / total_t) * 100
     wait_pct = (tb["scroll_waiting_sec"] / total_t) * 100
 
     content = (
@@ -60,10 +61,10 @@ def print_benchmark_card(bm: dict):
         f"[bold green]Posts Collected:[/bold green] [bold]{bm['posts_collected']}/{bm['limit_target']}[/bold]  │  "
         f"[bold magenta]Scrolls:[/bold magenta] [bold]{bm['scrolls_performed']}/{bm['max_scrolls']}[/bold]\n\n"
         f"[bold underline]Time Breakdown:[/bold underline]\n"
-        f"  • [blue]Network & Navigation[/blue] : [bold]{tb['navigation_network_sec']:.2f}s[/bold] ({nav_pct:.1f}%)\n"
-        f"  • [yellow]Scroll & Lazy-Wait[/yellow]   : [bold]{tb['scroll_waiting_sec']:.2f}s[/bold] ({wait_pct:.1f}%)\n"
-        f"  • [green]DOM Extraction[/green]       : [bold]{tb['dom_extraction_sec']:.2f}s[/bold] ({ext_pct:.1f}%)\n"
-        f"  • [white]Total Elapsed[/white]        : [bold white]{tb['total_duration_sec']:.2f}s[/bold white] "
+        f"  • [blue]Network & Navigation[/blue]  : [bold]{tb['navigation_network_sec']:.2f}s[/bold] ({nav_pct:.1f}%)\n"
+        f"  • [yellow]Scroll & Lazy-Wait[/yellow]    : [bold]{tb['scroll_waiting_sec']:.2f}s[/bold] ({wait_pct:.1f}%)\n"
+        f"  • [green]JSON Processing (0 DOM)[/green]: [bold]{json_proc:.3f}s[/bold] ({proc_pct:.1f}%)\n"
+        f"  • [white]Total Elapsed[/white]         : [bold white]{tb['total_duration_sec']:.2f}s[/bold white] "
         f"([cyan]{tp['ppm']:.1f} PPM[/cyan] │ [dim]{tp['seconds_per_post']:.2f}s per post[/dim])\n\n"
         f"[bold underline]Resource Consumption:[/bold underline]\n"
         f"  • CPU: [bold]{res['cpu_percent']}%[/bold]  │  "
