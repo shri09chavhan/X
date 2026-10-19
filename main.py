@@ -273,6 +273,11 @@ def main():
             if bm:
                 print_benchmark_card(bm)
                 save_benchmark_to_disk(bm)
+                # Benchmark comparison
+                from scraper.utils.benchmark import PerformanceBenchmark
+                bench = PerformanceBenchmark()
+                comp = bench.compare_with_latest(bm)
+                logger.info(f"Benchmark comparison: {comp['summary']}")
 
             # Save posts to JSON file
             safe_name = "".join(c for c in query if c.isalnum() or c in ("_", "-"))
