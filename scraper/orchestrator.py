@@ -181,17 +181,35 @@ class ScraperOrchestrator:
             wait_start = time.perf_counter()
             scroll_count += 1
 
-            # If previous attempt yielded no new posts, execute a deeper nudge scroll
-            # to cross X's infinite-scroll sentinel boundary
+            # In-Page Sentinel Overdrive:
+            # 1. Micro-pause to allow React virtual DOM to mount new bottom sentinel
+            time.sleep(0.25)
+
+            # 2. Prevent DOM tree bloat and V8 GC stalls by pruning off-screen nodes
+            if scroll_count % 5 == 0:
+                try:
+                    self.page.evaluate("""() => {
+                        const articles = document.querySelectorAll('article[data-testid="tweet"]');
+                        if (articles.length > 120) {
+                            for (let i = 0; i < articles.length - 60; i++) {
+                                articles[i].remove();
+                            }
+                        }
+                    }""")
+                except Exception:
+                    pass
+
+            # 3. Micro-oscillate to trigger React IntersectionObserver exit/entry events
             if consecutive_empty > 0:
-                scroll_distance = random.randint(4000, 6000)
+                # Deeper bounce if previous attempt was empty
+                self.page.evaluate("window.scrollBy(0, -450); window.scrollTo(0, document.body.scrollHeight);")
+                self.page.mouse.wheel(0, random.randint(2500, 4000))
             else:
-                scroll_distance = random.randint(3000, 4500)
+                self.page.evaluate("window.scrollBy(0, -200); window.scrollTo(0, document.body.scrollHeight);")
+                self.page.mouse.wheel(0, random.randint(1000, 1800))
 
-            self.page.mouse.wheel(0, scroll_distance)
-
-            # Pure event-driven network wait: resolves immediately when GraphQL response arrives (150-300ms)
-            self.network_extractor.wait_for_new_posts(timeout_sec=1.6)
+            # 4. Pure event-driven network wait: resolves immediately when GraphQL response arrives (150-300ms)
+            self.network_extractor.wait_for_new_posts(timeout_sec=2.2)
 
             scroll_waiting_time += time.perf_counter() - wait_start
 
