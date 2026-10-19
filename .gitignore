@@ -22,3 +22,7 @@ user_data/
 session.json
 scraped_tweets.json
 output/
+
+# Scratch & Temporary Files
+architecture_*.html
+fix_hermes.sh
