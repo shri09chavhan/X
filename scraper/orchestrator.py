@@ -1,6 +1,7 @@
 """
 Orchestration module.
-Manages the main scraping workflow, orchestrating the browser and extractor.
+Manages the main scraping workflow, orchestrating the browser, network interceptor,
+and fallback DOM extractor.
 Maintains a persistent browser session and captures granular performance & resource benchmarks.
 """
 
@@ -13,6 +14,7 @@ from urllib.parse import quote
 
 from .browser_handler import BrowserHandler
 from .dom_extractor import DOMExtractor
+from .network_extractor import GraphQLExtractor
 from .utils.monitor import get_process_metrics
 
 logger = logging.getLogger("twitter_scraper.orchestrator")
@@ -20,29 +22,31 @@ logger = logging.getLogger("twitter_scraper.orchestrator")
 
 class ScraperOrchestrator:
     """
-    Orchestrates the scraping process, integrating browser and extractor modules.
+    Orchestrates the scraping process using GraphQL network interception with DOM fallback.
     Maintains a persistent browser session for optimized resource usage.
     """
 
     def __init__(self, session_file: Path, config_path: Path):
         self.browser = BrowserHandler(session_file)
-        self.extractor = DOMExtractor(config_path)
-        self.selectors = self.extractor.selectors
+        self.dom_extractor = DOMExtractor(config_path)
+        self.selectors = self.dom_extractor.selectors
+        self.network_extractor = GraphQLExtractor()
         self.context = None
         self.page = None
         self.last_benchmark: Dict[str, Any] = {}
 
     def start(self, headless: bool = False) -> None:
-        """Launches the persistent browser session."""
+        """Launches the persistent browser session and binds network interceptors."""
         self.context = self.browser.launch(headless=headless)
         self.page = self.context.new_page()
+        self.network_extractor.attach_to_page(self.page)
 
     def stop(self) -> None:
         """Terminates the browser session."""
         self.browser.close()
 
     def _open_search_results(self, query: str, select_latest: bool = True) -> bool:
-        """Navigates to search page and waits for results."""
+        """Navigates to search page and waits for initial results container."""
         logger.info(f"Navigating to X search for: {query}")
         url = f"https://x.com/search?q={quote(query)}"
         if select_latest:
@@ -66,16 +70,7 @@ class ScraperOrchestrator:
     ) -> List[Dict[str, Any]]:
         """
         Scrapes data for a query with configurable limits and captures detailed benchmarks.
-        
-        Args:
-            query: The search term.
-            limit: Target number of posts to collect.
-            max_scrolls: Maximum number of scroll operations allowed.
-            max_empty_scrolls: Consecutive scrolls with no new posts before giving up.
-            select_latest: Whether to query the 'Latest' tab (default: True).
-            
-        Returns:
-            List of extracted post dictionaries.
+        Prioritizes high-speed GraphQL network interception, falling back to DOM extraction.
         """
         if not self.page:
             raise RuntimeError("Browser not started. Call .start() first.")
@@ -86,13 +81,16 @@ class ScraperOrchestrator:
         collected_posts: List[Dict[str, Any]] = []
         seen_ids: Set[str] = set()
 
-        # 1. Measure Navigation & Network Time
+        # Reset interceptor buffers for fresh query
+        self.network_extractor.reset()
+
+        # 1. Navigation & Network Latency
         nav_start = time.perf_counter()
         if not self._open_search_results(query, select_latest=select_latest):
             return []
         network_nav_time = time.perf_counter() - nav_start
 
-        # 2. Scrolling & Extraction Loop
+        # 2. Extraction & Scrolling Loop
         extraction_time = 0.0
         scroll_waiting_time = 0.0
         scroll_count = 0
@@ -103,22 +101,32 @@ class ScraperOrchestrator:
             and consecutive_empty < max_empty_scrolls
             and scroll_count < max_scrolls
         ):
-            # Measure pure DOM extraction time
             ext_start = time.perf_counter()
-            articles = self.page.query_selector_all(self.selectors["post_container"])
             new_found = 0
 
-            for article in articles:
-                if len(collected_posts) >= limit:
-                    break
+            # Priority 1: Pull from intercepted GraphQL network responses
+            needed = limit - len(collected_posts)
+            intercepted_posts = self.network_extractor.get_new_posts(needed)
 
-                post = self.extractor.extract_post_data(article)
-                uid = post.get("post_id") or post.get("post_url")
-
-                if uid and uid not in seen_ids:
+            for post in intercepted_posts:
+                uid = post["post_id"]
+                if uid not in seen_ids:
                     seen_ids.add(uid)
                     collected_posts.append(post)
                     new_found += 1
+
+            # Priority 2: Fallback to DOM extraction if network payload is pending or omitted
+            if len(collected_posts) < limit and not intercepted_posts:
+                articles = self.page.query_selector_all(self.selectors["post_container"])
+                for article in articles:
+                    if len(collected_posts) >= limit:
+                        break
+                    post = self.dom_extractor.extract_post_data(article)
+                    uid = post.get("post_id") or post.get("post_url")
+                    if uid and uid not in seen_ids:
+                        seen_ids.add(uid)
+                        collected_posts.append(post)
+                        new_found += 1
 
             extraction_time += time.perf_counter() - ext_start
 
@@ -127,7 +135,7 @@ class ScraperOrchestrator:
             else:
                 consecutive_empty += 1
 
-            # Termination condition
+            # Check stopping conditions
             if (
                 len(collected_posts) >= limit
                 or consecutive_empty >= max_empty_scrolls
@@ -138,19 +146,22 @@ class ScraperOrchestrator:
             # Measure scroll dispatch and lazy-load wait time
             wait_start = time.perf_counter()
             scroll_count += 1
-            current_article_count = len(articles)
 
-            # Native CloakBrowser big scroll (3-4 viewports down, genuine OS input event)
+            try:
+                current_article_count = len(self.page.query_selector_all(self.selectors["post_container"]))
+            except Exception:
+                current_article_count = 0
+
+            # Native CloakBrowser big scroll
             self.page.mouse.wheel(0, random.randint(2500, 3800))
 
-            # Dynamic Smart Wait: resolves immediately the millisecond new posts mount in DOM
+            # Smart Wait: resolves when new DOM nodes appear or timeout
             try:
                 self.page.wait_for_function(
                     f"() => document.querySelectorAll('{self.selectors['post_container']}').length > {current_article_count}",
                     timeout=2500,
                 )
             except Exception:
-                # Fallback if network is delayed or end of feed is reached
                 pass
 
             scroll_waiting_time += time.perf_counter() - wait_start
@@ -161,7 +172,6 @@ class ScraperOrchestrator:
         ppm = (len(collected_posts) / total_time * 60) if total_time > 0 else 0
         sec_per_post = (total_time / len(collected_posts)) if collected_posts else 0
 
-        # Detailed benchmark metrics record
         self.last_benchmark = {
             "query": query,
             "posts_collected": len(collected_posts),
